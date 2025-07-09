@@ -1,154 +1,25 @@
-name: Python CI/CD
+name: Python Deployment
 
 on:
   push:
     branches:
       - main
-  pull_request:
-    branches:
-      - main
 
 jobs:
-  build-and-test:
-    runs-on: ubuntu-latest
-
-    steps:
-    - name: Checkout repository
-      uses: actions/checkout@v4
-
-    - name: Set up Python
-      uses: actions/setup-python@v5
-      with:
-        python-version: '3.12'
-
-    - name: Check GPU availability (Optional)
-      run: |
-        echo "Checking GPU availability..."
-        if command -v nvidia-smi &> /dev/null; then
-          nvidia-smi
-          echo "GPU detected and working!"
-        else
-          echo "No GPU detected or nvidia-smi not available. Continuing without GPU..."
-        fi
-
-    - name: Install core dependencies manually
-      run: |
-        python -m pip install --upgrade pip
-        # Install key dependencies from your requirements_GPU.txt
-        pip install --extra-index-url https://download.pytorch.org/whl/cu126 torch==2.6.0 torchvision==0.21.0 torchaudio==2.6.0
-        pip install fastapi uvicorn numpy==1.26.4 opencv-python==4.11.0.86 pillow matplotlib
-        pip install mediapipe==0.10.21 qdrant-client requests pydantic==2.10.6
-        pip install google-api-core google-auth google-cloud-vision
-        pip install insightface==0.7.3 onnxruntime==1.22.0 paddleocr==2.10.0
-        pip install scikit-image==0.25.2 scipy==1.15.2 python-dotenv jwt
-
-    - name: Run tests (if you have any)
-      run: |
-        # Add your test commands here, for example:
-        # python -m pytest tests/
-        # or
-        # python -m unittest discover
-        echo "Running tests..."
-        # Uncomment and modify based on your test setup
-        # python -m pytest --verbose
-
-    - name: Display Project Structure (Optional, for debugging)
-      run: ls -R
-
-  # Deploy job - runs only on push to main branch and after successful build
   deploy:
-    needs: build-and-test
     runs-on: ubuntu-latest
-    if: github.ref == 'refs/heads/main' && github.event_name == 'push'
 
     steps:
-    - name: Checkout repository
-      uses: actions/checkout@v4
-
-    - name: Set up SSH key
-      run: |
-        echo "${{ secrets.EC2_PRIVATE_KEY }}" > private_key
-        chmod 600 private_key
-
-    - name: Deploy to EC2
-      run: |
-        ssh -o StrictHostKeyChecking=no -i private_key ubuntu@${{ secrets.EC2_INSTANCE_IP }} << 'ENDSSH'
-          set -e
-          
-          # Create project directory if it doesn't exist
-          mkdir -p ~/Demo-Python-Deployment
-          cd ~/Demo-Python-Deployment
-          
-          # Check if it's already a git repository
-          if [ ! -d ".git" ]; then
-            echo "Initializing git repository..."
-            git init
-            git remote add origin https://github.com/Astra-Network-Organization/Demo-Python-Deployment.git
-          else
-            echo "Git repository already exists, updating remote URL..."
-            git remote set-url origin https://github.com/Astra-Network-Organization/Demo-Python-Deployment.git
-          fi
-          
-          # Fetch and pull latest changes from public repository
-          echo "Fetching latest changes..."
-          git fetch origin main
-          
-          # Reset to latest main branch (in case of any local changes)
-          git reset --hard origin/main
-          
-          # Alternative: Simple pull (use this if you prefer)
-          # git pull origin main
-          
-          # Setup Python virtual environment
-          echo "Setting up Python virtual environment..."
-          python3 -m venv venv
-          source venv/bin/activate
-          
-          # Install dependencies
-          echo "Installing dependencies..."
-          pip install --upgrade pip
-          
-          # Install from requirements.txt if it exists
-          if [ -f "requirements.txt" ]; then
+      - name: Deploy to EC2
+        run: |
+          echo "${{ secrets.EC2_SSH_PRIVATE_KEY }}" > private_key
+          chmod 600 private_key
+          ssh -o StrictHostKeyChecking=no -i private_key ubuntu@${{ secrets.EC2_INSTANCE_IP }} << 'ENDSSH'
+            set -e
+            cd ~/Demo-Python-Deployment || { echo "Directory not found"; exit 1; }
+            git pull origin main
+            source venv/bin/activate
             pip install -r requirements.txt
-          fi
-          
-          # Install additional dependencies
-          pip install mediapipe tensorflow opencv-python fastapi qdrant-client google-cloud-vision faiss-cpu
-          
-          # Handle systemd service
-          echo "Managing systemd service..."
-          sudo systemctl daemon-reload
-          sudo systemctl enable fastapi-demo.service
-          sudo systemctl restart fastapi-demo.service
-          
-          # Wait a moment for service to start
-          sleep 5
-          
-          # Check service status
-          echo "Checking service status..."
-          sudo systemctl status fastapi-demo.service --no-pager
-          
-          echo "Deployment completed successfully!"
-        ENDSSH
-
-    - name: Clean up SSH key
-      if: always()
-      run: rm -f private_key
-
-    - name: Deployment Success Notification
-      if: success()
-      run: |
-        echo "🚀 Deployment completed successfully!"
-        echo "Application deployed to production environment"
-        echo "Service is running on EC2 instance: ${{ secrets.EC2_INSTANCE_IP }}"
-        # You can add Slack/Discord notifications here
-        # curl -X POST -H 'Content-type: application/json' --data '{"text":"Deployment successful!"}' ${{ secrets.SLACK_WEBHOOK }}
-
-    - name: Deployment Failure Notification
-      if: failure()
-      run: |
-        echo "❌ Deployment failed!"
-        echo "Please check the logs for more details"
-        # You can add failure notifications here
-        # curl -X POST -H 'Content-type: application/json' --data '{"text":"Deployment failed! Please check the logs."}' ${{ secrets.SLACK_WEBHOOK }}
+            sudo systemctl restart fastapi-demo.service
+          ENDSSH
+          rm -f private_key
