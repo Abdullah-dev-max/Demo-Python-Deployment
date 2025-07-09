@@ -31,23 +31,17 @@ jobs:
           echo "No GPU detected or nvidia-smi not available. Continuing without GPU..."
         fi
 
-    - name: Verify requirements file exists
-      run: |
-        if [ -f "requirements_GPU.txt" ]; then
-          echo "requirements_GPU.txt found"
-          cat requirements_GPU.txt
-        else
-          echo "requirements_GPU.txt not found. Listing directory contents:"
-          ls -la
-        fi
-
-    - name: Install GPU dependencies
+    - name: Install dependencies with fallback
       run: |
         python -m pip install --upgrade pip
         if [ -f "requirements_GPU.txt" ]; then
+          echo "Installing GPU requirements..."
           pip install -r requirements_GPU.txt
+        elif [ -f "requirements_CPU.txt" ]; then
+          echo "GPU requirements not found, falling back to CPU requirements..."
+          pip install -r requirements_CPU.txt
         else
-          echo "requirements_GPU.txt not found, skipping dependency installation"
+          echo "No requirements file found!"
           exit 1
         fi
 
