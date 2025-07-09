@@ -1,138 +1,145 @@
-Skip to content
-Navigation Menu
-Abdullah-dev-max
-Demo-Python-Deployment
+name: Python Package using Conda
 
-Type / to search
-Code
-Issues
-Pull requests
-Actions
-Projects
-Wiki
-Security
-Insights
-Settings
-Python CI/CD
-Update main rt1.yml #10
-Jobs
-Run details
-Workflow file for this run
-.github/workflows/main.yml at 9cc4b51
-name: Python CI/CD
-
-on:
-  push:
-    branches:
-      - main
-  pull_request:
-    branches:
-      - main
+on: [push]
 
 jobs:
-  build-and-test:
+  build-and-deploy:
     runs-on: ubuntu-latest
+    timeout-minutes: 15
+    strategy:
+      max-parallel: 5
 
     steps:
-    - name: Checkout repository
-      uses: actions/checkout@v4
-
-    - name: Set up Python
-      uses: actions/setup-python@v5
+    - uses: actions/checkout@v4
+    
+    - name: Set up Python 3.10
+      uses: actions/setup-python@v3
       with:
-        python-version: '3.12'
-
-    - name: Check GPU availability (Optional)
+        python-version: '3.10'
+        
+    - name: Add conda to system path
       run: |
-        echo "Checking GPU availability..."
-        if command -v nvidia-smi &> /dev/null; then
-          nvidia-smi
-          echo "GPU detected and working!"
-        else
-          echo "No GPU detected or nvidia-smi not available. Continuing without GPU..."
-        fi
-    - name: Install core dependencies manually
+        echo $CONDA/bin >> $GITHUB_PATH
+        
+    - name: Install dependencies locally
       run: |
-        python -m pip install --upgrade pip
-        # Install key dependencies from your requirements_GPU.txt
-        pip install --extra-index-url https://download.pytorch.org/whl/cu126 torch==2.6.0 torchvision==0.21.0 torchaudio==2.6.0
-        pip install fastapi uvicorn numpy==1.26.4 opencv-python==4.11.0.86 pillow matplotlib
-        pip install mediapipe==0.10.21 qdrant-client requests pydantic==2.10.6
-        pip install google-api-core google-auth google-cloud-vision
-        pip install insightface==0.7.3 onnxruntime==1.22.0 paddleocr==2.10.0
-        pip install scikit-image==0.25.2 scipy==1.15.2 python-dotenv jwt
-    - name: Run tests (if you have any)
-      run: |
-        # Add your test commands here, for example:
-        # python -m pytest tests/
-        # or
-        # python -m unittest discover
-        echo "Running tests..."
-        # Uncomment and modify based on your test setup
-        # python -m pytest --verbose
-    - name: Display Project Structure (Optional, for debugging)
-      run: ls -R
-
-  # Deploy job - runs only on push to main branch and after successful build
-  deploy:
-    needs: build-and-test
-    runs-on: ubuntu-latest
-    if: github.ref == 'refs/heads/main' && github.event_name == 'push'
-
-    steps:
-    - name: Checkout repository
-      uses: actions/checkout@v4
+        conda env update --file environment.yml --name base
 
     - name: Set up SSH key
       run: |
-        echo "${{ secrets.EC2_PRIVATE_KEY }}" > private_key
+        echo "${{ secrets.EC2_SSH_PRIVATE_KEY }}" > private_key
         chmod 600 private_key
+
     - name: Deploy to EC2
+      timeout-minutes: 10
       run: |
-        ssh -o StrictHostKeyChecking=no -i private_key ubuntu@${{ secrets.EC2_INSTANCE_IP }} << 'ENDSSH'
+        ssh -o StrictHostKeyChecking=no -o ConnectTimeout=30 -i private_key ubuntu@${{ secrets.EC2_INSTANCE_IP }} << 'ENDSSH'
           set -e
           
-          # Navigate to project directory
-          cd ~/Demo-Python-Deployment || { echo "Directory not found"; exit 1; }
+          # Function for logging
+          log() {
+            echo "$(date '+%Y-%m-%d %H:%M:%S') - $1"
+          }
           
-          # Configure git (use HTTPS instead of SSH to avoid key issues)
-          git remote set-url origin https://github.com/Astra-Network-Organization/Demo-Python-Deployment.git
-          git pull origin main
+          log "🚀 Starting conda deployment process..."
           
-          # Setup Python virtual environment
-          python3 -m venv venv
-          source venv/bin/activate
+          # Install miniconda if not present
+          if ! command -v conda &> /dev/null; then
+            log "📦 Installing Miniconda..."
+            wget https://repo.anaconda.com/miniconda/Miniconda3-latest-Linux-x86_64.sh -O miniconda.sh
+            bash miniconda.sh -b -p $HOME/miniconda
+            export PATH="$HOME/miniconda/bin:$PATH"
+            conda init bash
+            source ~/.bashrc
+          else
+            log "✅ Conda already installed"
+          fi
           
-          # Install dependencies
-          pip install --upgrade pip
-          pip install -r requirements.txt
-          pip install mediapipe tensorflow opencv-python fastapi qdrant-client google-cloud-vision faiss-cpu
+          # Update system packages (only if needed)
+          log "📦 Checking system dependencies..."
+          if ! command -v tesseract &> /dev/null || ! dpkg -l | grep -q build-essential; then
+            log "Installing missing system packages..."
+            sudo apt-get update -qq
+            sudo apt-get install -y -qq apt-utils build-essential libgl1-mesa-glx libglib2.0-0 tesseract-ocr g++
+          else
+            log "System dependencies already installed ✅"
+          fi
           
-          # Handle systemd service
+          # Setup project directory
+          log "📁 Setting up project directory..."
+          cd ~ && mkdir -p Demo-Python-Deployment
+          cd ~/Demo-Python-Deployment
+          
+          # Git operations
+          log "📥 Updating code repository..."
+          if [ ! -d ".git" ]; then
+            git init
+            git remote add origin https://github.com/Astra-Network-Organization/Demo-Python-Deployment.git
+          fi
+          git fetch origin main
+          git reset --hard origin/main
+          
+          # Conda environment setup
+          log "🐍 Setting up Conda environment..."
+          export PATH="$HOME/miniconda/bin:$PATH"
+          
+          if [ -f "environment.yml" ]; then
+            log "📚 Installing dependencies from environment.yml..."
+            conda env update --file environment.yml --name base
+          else
+            log "⚠️ No environment.yml found, using pip fallback..."
+            if [ -f "requirements.txt" ]; then
+              pip install -r requirements.txt -q
+            fi
+          fi
+          
+          # Install additional packages
+          log "📚 Installing additional packages..."
+          pip install mediapipe tensorflow opencv-python fastapi qdrant-client google-cloud-vision faiss-cpu -q
+          
+          # Service management with health check
+          log "⚙️ Managing application service..."
           sudo systemctl daemon-reload
           sudo systemctl enable fastapi-demo.service
           sudo systemctl restart fastapi-demo.service
           
-          # Check service status
-          sudo systemctl status fastapi-demo.service --no-pager
+          # Wait for service to start
+          sleep 5
+          
+          # Health check
+          log "🔍 Performing health check..."
+          if sudo systemctl is-active --quiet fastapi-demo.service; then
+            log "✅ Service is running successfully!"
+          else
+            log "❌ Service failed to start!"
+            sudo systemctl status fastapi-demo.service --no-pager
+            exit 1
+          fi
+          
+          log "🎉 Conda deployment completed successfully!"
         ENDSSH
-    - name: Clean up SSH key
+
+    - name: Verify Deployment
+      timeout-minutes: 2
+      run: |
+        echo "🔍 Verifying deployment..."
+        sleep 10
+
+    - name: Clean up
       if: always()
       run: rm -f private_key
 
     - name: Deployment Success Notification
       if: success()
       run: |
-        echo "🚀 Deployment completed successfully!"
-        echo "Application deployed to production environment"
-        echo "Service is running on EC2 instance: ${{ secrets.EC2_INSTANCE_IP }}"
-        # You can add Slack/Discord notifications here
-        # curl -X POST -H 'Content-type: application/json' --data '{"text":"Deployment successful!"}' ${{ secrets.SLACK_WEBHOOK }}
+        echo "🎉 Conda deployment completed successfully!"
+        echo "📍 Application is running on: ${{ secrets.EC2_INSTANCE_IP }}"
+        echo "⏰ Deployment time: $(date)"
+
     - name: Deployment Failure Notification
       if: failure()
       run: |
-        echo "❌ Deployment failed!"
-        echo "Please check the logs for more details"
-        # You can add failure notifications here
-        # curl -X POST -H 'Content-type: application/json' --data '{"text":"Deployment failed! Please check the logs."}' ${{ secrets.SLACK_WEBHOOK }}
-Update main rt1.yml · Abdullah-dev-max/Demo-Python-Deployment@9cc4b51
+        echo "💥 Conda deployment failed!"
+        echo "🔍 Check the logs above for error details"
+        echo "🕐 Failed at: $(date)"
+        exit 1
