@@ -75,37 +75,61 @@ jobs:
         ssh -o StrictHostKeyChecking=no -i private_key ubuntu@${{ secrets.EC2_INSTANCE_IP }} << 'ENDSSH'
           set -e
           
-          # Navigate to project directory
-          cd ~/Demo-Python-Deployment || { echo "Directory not found"; exit 1; }
+          # Create project directory if it doesn't exist
+          mkdir -p ~/Demo-Python-Deployment
+          cd ~/Demo-Python-Deployment
           
-          # Configure git with personal access token for authentication
-          git config --global credential.helper store
+          # Check if it's already a git repository
+          if [ ! -d ".git" ]; then
+            echo "Initializing git repository..."
+            git init
+            git remote add origin https://github.com/Astra-Network-Organization/Demo-Python-Deployment.git
+          else
+            echo "Git repository already exists, updating remote URL..."
+            git remote set-url origin https://github.com/Astra-Network-Organization/Demo-Python-Deployment.git
+          fi
           
-          # Set up authenticated URL with personal access token
-          git remote set-url origin https://${{ secrets.GITHUB_TOKEN }}@github.com/Astra-Network-Organization/Demo-Python-Deployment.git
+          # Fetch and pull latest changes from public repository
+          echo "Fetching latest changes..."
+          git fetch origin main
           
-          # Alternative: Use a personal access token if GITHUB_TOKEN doesn't work
-          # git remote set-url origin https://${{ secrets.GITHUB_PERSONAL_TOKEN }}@github.com/Astra-Network-Organization/Demo-Python-Deployment.git
+          # Reset to latest main branch (in case of any local changes)
+          git reset --hard origin/main
           
-          # Pull latest changes
-          git pull origin main
+          # Alternative: Simple pull (use this if you prefer)
+          # git pull origin main
           
           # Setup Python virtual environment
+          echo "Setting up Python virtual environment..."
           python3 -m venv venv
           source venv/bin/activate
           
           # Install dependencies
+          echo "Installing dependencies..."
           pip install --upgrade pip
-          pip install -r requirements.txt
+          
+          # Install from requirements.txt if it exists
+          if [ -f "requirements.txt" ]; then
+            pip install -r requirements.txt
+          fi
+          
+          # Install additional dependencies
           pip install mediapipe tensorflow opencv-python fastapi qdrant-client google-cloud-vision faiss-cpu
           
           # Handle systemd service
+          echo "Managing systemd service..."
           sudo systemctl daemon-reload
           sudo systemctl enable fastapi-demo.service
           sudo systemctl restart fastapi-demo.service
           
+          # Wait a moment for service to start
+          sleep 5
+          
           # Check service status
+          echo "Checking service status..."
           sudo systemctl status fastapi-demo.service --no-pager
+          
+          echo "Deployment completed successfully!"
         ENDSSH
 
     - name: Clean up SSH key
