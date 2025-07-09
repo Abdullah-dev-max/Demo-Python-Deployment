@@ -9,8 +9,8 @@ on:
       - main
 
 jobs:
-  build-only: # Renamed job to reflect its purpose
-    runs-on: ubuntu-latest # Using a standard Ubuntu runner for CPU-based CI
+  build-only:
+    runs-on: ubuntu-latest
 
     steps:
     - name: Checkout repository
@@ -19,48 +19,38 @@ jobs:
     - name: Set up Python
       uses: actions/setup-python@v5
       with:
-        python-version: '3.12.11' # You can specify your desired Python version, e.g., '3.8', '3.10', '3.11'
+        python-version: '3.9' # Or your desired Python version
 
     - name: Install CPU dependencies
       run: |
         python -m pip install --upgrade pip
-        pip install -r requirements_CPU.txt
+        # ----------------------------------------------------------------------
+        # FIX HERE: Adjust the path to requirements_CPU.txt if it's in a subdirectory.
+        # Examples:
+        # If requirements_CPU.txt is in a 'src' folder: pip install -r src/requirements_CPU.txt
+        # If requirements_CPU.txt is in a 'config' folder: pip install -r config/requirements_CPU.txt
+        # If it's in the root (and you still got the error), double check its exact name in your repo.
+        # ----------------------------------------------------------------------
+        pip install -r requirements_CPU.txt # KEEP THIS LINE, BUT MODIFY THE PATH if needed!
 
     - name: Display Project Structure (Optional, for debugging)
       run: ls -R
 
   # --- Deployment Job (Requires more information) ---
   # deploy:
-  #   needs: build-only # This job will now only run if build-only passes
+  #   needs: build-only
   #   runs-on: ubuntu-latest
-  #   environment: production # Example: link to a GitHub Environments
-  #   if: github.ref == 'refs/heads/main' # Only deploy on pushes to main
+  #   environment: production
+  #   if: github.ref == 'refs/heads/main'
   #   steps:
   #     - name: Checkout repository
   #       uses: actions/checkout@v4
-  #     - name: Set up Python # If needed for deployment scripts
+  #     - name: Set up Python
   #       uses: actions/setup-python@v5
   #       with:
   #         python-version: '3.9'
   #     - name: Install Deployment Dependencies (if any)
   #       run: pip install some-deployment-tool
   #     - name: Deploy to Target Environment
-  #       # This is where your deployment logic goes.
-  #       # Examples:
-  #       # - Deploying to AWS S3/EC2: uses: aws-actions/configure-aws-credentials, aws-actions/amazon-ecs-deploy-task-definition
-  #       # - Deploying a Docker image: docker build, docker push
-  #       # - SSH into a server and run commands: uses: appleboy/ssh-action
-  #       # - Using specific deployment tools or scripts
   #       run: |
   #         echo "Add your deployment commands here."
-  #         # Example: Build and push a Docker image
-  #         # docker build -t my-app .
-  #         # docker login -u ${{ secrets.DOCKER_USERNAME }} -p ${{ secrets.DOCKER_PASSWORD }}
-  #         # docker push my-app
-  #         # Example: Run a deployment script
-  #         # python deploy_script.py --target prod
-  #
-  #     # If you have GPU requirements for deployment, you'd need a runner that supports it,
-  #     # which usually involves self-hosted runners or specific cloud-provided runners.
-  #     # For example, if deploying a Docker image that uses GPU, the build might be on CPU,
-  #     # but the runtime environment (where the image is used) would need GPU.
