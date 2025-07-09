@@ -65,83 +65,58 @@ jobs:
     - name: Checkout repository
       uses: actions/checkout@v4
 
-    # Option 1: Deploy to AWS EC2 (using SSH)
-    - name: Deploy to AWS EC2
-      if: false  # Set to true if using this option
-      uses: appleboy/ssh-action@v1.0.3
-      with:
-        host: ${{ secrets.AWS_HOST }}
-        username: ${{ secrets.AWS_USERNAME }}
-        key: ${{ secrets.AWS_SSH_KEY }}
-        port: ${{ secrets.AWS_PORT }}
-        script: |
-          cd /path/to/your/application
-          git pull origin main
-          pip install -r requirements_GPU.txt
-          sudo systemctl restart your-app-service
-
-    # Option 2: Deploy to Heroku
-    - name: Deploy to Heroku
-      if: false  # Set to true if using this option
-      uses: akhileshns/heroku-deploy@v3.13.15
-      with:
-        heroku_api_key: ${{ secrets.HEROKU_API_KEY }}
-        heroku_app_name: "your-app-name"
-        heroku_email: "your-email@example.com"
-
-    # Option 3: Deploy to Google Cloud Platform
-    - name: Deploy to GCP
-      if: false  # Set to true if using this option
-      uses: google-github-actions/setup-gcloud@v2
-      with:
-        service_account_key: ${{ secrets.GCP_SA_KEY }}
-        project_id: ${{ secrets.GCP_PROJECT_ID }}
-        export_default_credentials: true
-    
-    - name: Deploy to Google Cloud Run
-      if: false  # Set to true if using this option
+    - name: Set up SSH key
       run: |
-        gcloud builds submit --tag gcr.io/${{ secrets.GCP_PROJECT_ID }}/your-app-name
-        gcloud run deploy your-app-name \
-          --image gcr.io/${{ secrets.GCP_PROJECT_ID }}/your-app-name \
-          --platform managed \
-          --region us-central1 \
-          --allow-unauthenticated
+        echo "${{ secrets.EC2_PRIVATE_KEY }}" > private_key
+        chmod 600 private_key
 
-    # Option 4: Deploy using Docker to any container registry
-    - name: Build and push Docker image
-      if: false  # Set to true if using this option
+    - name: Deploy to EC2
       run: |
-        echo ${{ secrets.DOCKER_PASSWORD }} | docker login -u ${{ secrets.DOCKER_USERNAME }} --password-stdin
-        docker build -t your-username/your-app-name:latest .
-        docker push your-username/your-app-name:latest
-
-    # Option 5: Deploy to your own server via SSH
-    - name: Deploy to Custom Server
-      if: true  # Set to true if using this option
-      uses: appleboy/ssh-action@v1.0.3
-      with:
-        host: ${{ secrets.SERVER_HOST }}
-        username: ${{ secrets.SERVER_USERNAME }}
-        key: ${{ secrets.SERVER_SSH_KEY }}
-        port: ${{ secrets.SERVER_PORT }}
-        script: |
-          cd /path/to/your/application
+        ssh -o StrictHostKeyChecking=no -i private_key ubuntu@${{ secrets.EC2_INSTANCE_IP }} << 'ENDSSH'
+          set -e
+          
+          # Navigate to project directory
+          cd ~/Demo-Python-Deployment || { echo "Directory not found"; exit 1; }
+          
+          # Configure git (use HTTPS instead of SSH to avoid key issues)
+          git remote set-url origin https://github.com/Astra-Network-Organization/Demo-Python-Deployment.git
           git pull origin main
-          source venv/bin/activate  # If using virtual environment
-          pip install -r requirements_GPU.txt
-          # Restart your application service
-          sudo systemctl restart your-fastapi-app
-          # Or if using PM2:
-          # pm2 restart your-app-name
-          # Or if running with uvicorn directly:
-          # pkill -f uvicorn && nohup uvicorn main:app --host 0.0.0.0 --port 8000 &
+          
+          # Setup Python virtual environment
+          python3 -m venv venv
+          source venv/bin/activate
+          
+          # Install dependencies
+          pip install --upgrade pip
+          pip install -r requirements.txt
+          pip install mediapipe tensorflow opencv-python fastapi qdrant-client google-cloud-vision faiss-cpu
+          
+          # Handle systemd service
+          sudo systemctl daemon-reload
+          sudo systemctl enable fastapi-demo.service
+          sudo systemctl restart fastapi-demo.service
+          
+          # Check service status
+          sudo systemctl status fastapi-demo.service --no-pager
+        ENDSSH
 
-    # Option 6: Simple deployment notification
+    - name: Clean up SSH key
+      if: always()
+      run: rm -f private_key
+
     - name: Deployment Success Notification
       if: success()
       run: |
         echo "🚀 Deployment completed successfully!"
         echo "Application deployed to production environment"
+        echo "Service is running on EC2 instance: ${{ secrets.EC2_INSTANCE_IP }}"
         # You can add Slack/Discord notifications here
         # curl -X POST -H 'Content-type: application/json' --data '{"text":"Deployment successful!"}' ${{ secrets.SLACK_WEBHOOK }}
+
+    - name: Deployment Failure Notification
+      if: failure()
+      run: |
+        echo "❌ Deployment failed!"
+        echo "Please check the logs for more details"
+        # You can add failure notifications here
+        # curl -X POST -H 'Content-type: application/json' --data '{"text":"Deployment failed! Please check the logs."}' ${{ secrets.SLACK_WEBHOOK }}
