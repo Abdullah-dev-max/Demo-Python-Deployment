@@ -24,14 +24,6 @@ jobs:
       uses: actions/setup-python@v3
       with:
         python-version: '3.12.11'
-        
-    - name: Add conda to system path
-      run: |
-        echo $CONDA/bin >> $GITHUB_PATH
-        
-    - name: Install dependencies locally
-      run: |
-        conda env update --file environment.yml --name base
 
     - name: Set up SSH key
       run: |
@@ -76,29 +68,27 @@ jobs:
           # Install miniconda if not present
           if ! command -v conda &> /dev/null; then
             log "📦 Installing Miniconda..."
-            wget https://repo.anaconda.com/miniconda/Miniconda3-latest-Linux-x86_64.sh -O miniconda.sh
-            bash miniconda.sh -b -p $HOME/miniconda
-            export PATH="$HOME/miniconda/bin:$PATH"
-            conda init bash
+            cd ~
+            mkdir -p conda
+            cd conda
+            wget https://repo.anaconda.com/miniconda/Miniconda3-latest-Linux-x86_64.sh
+            bash Miniconda3-latest-Linux-x86_64.sh -b -p $HOME/miniconda3
+            export PATH="$HOME/miniconda3/bin:$PATH"
             source ~/.bashrc
           else
             log "✅ Conda already installed"
           fi
           
           # Update system packages (only if needed)
-          log "📦 Checking system dependencies..."
-          if ! command -v tesseract &> /dev/null || ! dpkg -l | grep -q build-essential; then
-            log "Installing missing system packages..."
-            sudo apt-get update -qq
-            sudo apt-get install -y -qq apt-utils build-essential libgl1-mesa-glx libglib2.0-0 tesseract-ocr g++
-          else
-            log "System dependencies already installed ✅"
-          fi
+          log "📦 Installing system dependencies..."
+          sudo apt-get update -qq
+          sudo apt-get install -y -qq ffmpeg libsm6 libxext6 libgl1-mesa-dev apt-utils build-essential libgl1-mesa-glx libglib2.0-0 tesseract-ocr g++
           
           # Setup project directory
           log "📁 Setting up project directory..."
-          cd ~ && mkdir -p Demo-Python-Deployment
-          cd ~/Demo-Python-Deployment
+          cd ~ 
+          mkdir -p git_source_code
+          cd git_source_code
           
           # Git operations
           log "📥 Updating code repository..."
@@ -108,6 +98,12 @@ jobs:
           fi
           git fetch origin main
           git reset --hard origin/main
+          
+          # Set permissions
+          log "🔐 Setting permissions..."
+          sudo chmod 777 git_source_code || true
+          sudo chmod 777 model || true
+          sudo chmod 777 facial_recognition.py || true
           
           log "✅ Environment preparation completed!"
         ENDSSH
@@ -125,22 +121,33 @@ jobs:
           }
           
           log "🐍 Setting up Conda environment..."
-          cd ~/Demo-Python-Deployment
-          export PATH="$HOME/miniconda/bin:$PATH"
+          cd ~/git_source_code
+          export PATH="$HOME/miniconda3/bin:$PATH"
+          source ~/.bashrc
           
-          if [ -f "environment.yml" ]; then
-            log "📚 Installing dependencies from environment.yml..."
-            conda env update --file environment.yml --name base
+          # Create conda environment if it doesn't exist
+          if ! conda env list | grep -q "^kyc "; then
+            log "📦 Creating conda environment 'kyc' with Python 3.12.11..."
+            conda create -n kyc python=3.12.11 -y
           else
-            log "⚠️ No environment.yml found, using pip fallback..."
-            if [ -f "requirements.txt" ]; then
-              pip install -r requirements.txt -q
-            fi
+            log "✅ Conda environment 'kyc' already exists"
+          fi
+          
+          # Activate conda environment
+          conda activate kyc
+          
+          # Install dependencies
+          log "📚 Installing Python dependencies..."
+          if [ -f "requirements_CPU.txt" ]; then
+            python -m pip install -r requirements_CPU.txt
+          elif [ -f "requirements.txt" ]; then
+            python -m pip install -r requirements.txt
           fi
           
           # Install additional packages
           log "📚 Installing additional packages..."
-          pip install mediapipe tensorflow opencv-python fastapi qdrant-client google-cloud-vision faiss-cpu -q
+          pip install opencv-python==4.11.0.86
+          pip install mediapipe tensorflow fastapi qdrant-client google-cloud-vision faiss-cpu uvicorn
           
           log "✅ Dependencies installed successfully!"
         ENDSSH
@@ -161,29 +168,35 @@ jobs:
           log "👤 Deploying as user: $(whoami)"
           log "🖥️ Target server: $(hostname)"
           
-          cd ~/Demo-Python-Deployment
+          cd ~/git_source_code
+          export PATH="$HOME/miniconda3/bin:$PATH"
+          source ~/.bashrc
+          conda activate kyc
           
-          # Service management with health check
-          log "⚙️ Managing application service..."
-          sudo systemctl daemon-reload
-          sudo systemctl enable fastapi-demo.service
-          sudo systemctl restart fastapi-demo.service
+          # Kill existing uvicorn processes
+          log "🔄 Stopping existing processes..."
+          ps aux | grep uvicorn | grep -v grep | awk '{print $2}' | xargs -r kill -9 || true
+          
+          # Start application
+          log "🚀 Starting application..."
+          nohup uvicorn main:app --host 0.0.0.0 --port ${{ env.APP_PORT }} > uvicorn.log 2>&1 &
           
           # Wait for service to start
           sleep 5
           
           # Health check
           log "🔍 Performing health check..."
-          if sudo systemctl is-active --quiet fastapi-demo.service; then
-            log "✅ Service is running successfully!"
-            log "📊 Service status: $(sudo systemctl is-active fastapi-demo.service)"
+          if ps aux | grep -v grep | grep "uvicorn main:app"; then
+            log "✅ Application is running successfully!"
+            log "📊 Application PID: $(ps aux | grep -v grep | grep "uvicorn main:app" | awk '{print $2}')"
           else
-            log "❌ Service failed to start!"
-            sudo systemctl status fastapi-demo.service --no-pager
+            log "❌ Application failed to start!"
+            cat uvicorn.log || true
             exit 1
           fi
           
           log "🎉 Deployment completed successfully!"
+          log "🌐 Application is running on port ${{ env.APP_PORT }}"
         ENDSSH
 
     - name: Verify Deployment
@@ -192,6 +205,7 @@ jobs:
         echo "🔍 Verifying deployment..."
         echo "🖥️ Server: $EC2_INSTANCE_IP"
         echo "👤 User: $EC2_USER"
+        echo "🌐 Application URL: http://$EC2_INSTANCE_IP:$APP_PORT"
         sleep 10
 
     - name: Clean up
@@ -202,7 +216,7 @@ jobs:
       if: success()
       run: |
         echo "🎉 Conda deployment completed successfully!"
-        echo "📍 Application is running on: $EC2_INSTANCE_IP"
+        echo "📍 Application is running on: http://$EC2_INSTANCE_IP:$APP_PORT"
         echo "👤 Deployed as user: $EC2_USER"
         echo "⏰ Deployment time: $(date)"
 
