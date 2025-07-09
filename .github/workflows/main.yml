@@ -5,9 +5,14 @@ on: [push]
 jobs:
   build-and-deploy:
     runs-on: ubuntu-latest
-    timeout-minutes: 15
+    timeout-minutes: 20
     strategy:
       max-parallel: 5
+
+    env:
+      EC2_INSTANCE_IP: ${{ secrets.EC2_INSTANCE_IP }}
+      EC2_SSH_PRIVATE_KEY: ${{ secrets.EC2_SSH_PRIVATE_KEY }}
+      EC2_USER: ${{ secrets.EC2_USER }}
 
     steps:
     - uses: actions/checkout@v4
@@ -27,13 +32,35 @@ jobs:
 
     - name: Set up SSH key
       run: |
-        echo "${{ secrets.EC2_SSH_PRIVATE_KEY }}" > private_key
+        echo "$EC2_SSH_PRIVATE_KEY" > private_key
         chmod 600 private_key
+        echo "✅ SSH key configured successfully"
 
-    - name: Deploy to EC2
-      timeout-minutes: 10
+    - name: Test EC2 Connection
+      timeout-minutes: 3
       run: |
-        ssh -o StrictHostKeyChecking=no -o ConnectTimeout=30 -i private_key ${{ secrets.EC2_USER }}@${{ secrets.EC2_INSTANCE_IP }} << 'ENDSSH'
+        echo "🔗 Testing connection to EC2 instance..."
+        echo "🖥️ Target server: $EC2_INSTANCE_IP"
+        echo "👤 Target user: $EC2_USER"
+        
+        # Test SSH connection
+        ssh -o StrictHostKeyChecking=no -o ConnectTimeout=30 -i private_key $EC2_USER@$EC2_INSTANCE_IP << 'ENDSSH'
+          echo "✅ SSH connection successful!"
+          echo "🖥️ Connected to: $(hostname)"
+          echo "👤 Logged in as: $(whoami)"
+          echo "📍 Working directory: $(pwd)"
+          echo "🐧 OS Info: $(lsb_release -d 2>/dev/null || echo "$(uname -s) $(uname -r)")"
+          echo "💾 Disk space: $(df -h / | tail -1 | awk '{print $4}' | sed 's/G/ GB/')"
+          echo "🔧 Python version: $(python3 --version 2>/dev/null || echo "Python not found")"
+        ENDSSH
+        
+        echo "🎉 EC2 connection test completed successfully!"
+
+    - name: Prepare Environment on EC2
+      timeout-minutes: 8
+      run: |
+        echo "🔧 Preparing environment on EC2..."
+        ssh -o StrictHostKeyChecking=no -o ConnectTimeout=30 -i private_key $EC2_USER@$EC2_INSTANCE_IP << 'ENDSSH'
           set -e
           
           # Function for logging
@@ -41,9 +68,7 @@ jobs:
             echo "$(date '+%Y-%m-%d %H:%M:%S') - $1"
           }
           
-          log "🚀 Starting conda deployment process..."
-          log "👤 Deploying as user: $(whoami)"
-          log "🖥️ Target server: ${{ secrets.EC2_INSTANCE_IP }}"
+          log "🚀 Starting environment preparation..."
           
           # Install miniconda if not present
           if ! command -v conda &> /dev/null; then
@@ -81,8 +106,23 @@ jobs:
           git fetch origin main
           git reset --hard origin/main
           
-          # Conda environment setup
+          log "✅ Environment preparation completed!"
+        ENDSSH
+
+    - name: Install Dependencies on EC2
+      timeout-minutes: 5
+      run: |
+        echo "📚 Installing dependencies on EC2..."
+        ssh -o StrictHostKeyChecking=no -o ConnectTimeout=30 -i private_key $EC2_USER@$EC2_INSTANCE_IP << 'ENDSSH'
+          set -e
+          
+          # Function for logging
+          log() {
+            echo "$(date '+%Y-%m-%d %H:%M:%S') - $1"
+          }
+          
           log "🐍 Setting up Conda environment..."
+          cd ~/Demo-Python-Deployment
           export PATH="$HOME/miniconda/bin:$PATH"
           
           if [ -f "environment.yml" ]; then
@@ -99,6 +139,27 @@ jobs:
           log "📚 Installing additional packages..."
           pip install mediapipe tensorflow opencv-python fastapi qdrant-client google-cloud-vision faiss-cpu -q
           
+          log "✅ Dependencies installed successfully!"
+        ENDSSH
+
+    - name: Deploy to EC2
+      timeout-minutes: 5
+      run: |
+        echo "🚀 Deploying application to EC2..."
+        ssh -o StrictHostKeyChecking=no -o ConnectTimeout=30 -i private_key $EC2_USER@$EC2_INSTANCE_IP << 'ENDSSH'
+          set -e
+          
+          # Function for logging
+          log() {
+            echo "$(date '+%Y-%m-%d %H:%M:%S') - $1"
+          }
+          
+          log "🚀 Starting final deployment process..."
+          log "👤 Deploying as user: $(whoami)"
+          log "🖥️ Target server: $(hostname)"
+          
+          cd ~/Demo-Python-Deployment
+          
           # Service management with health check
           log "⚙️ Managing application service..."
           sudo systemctl daemon-reload
@@ -112,21 +173,22 @@ jobs:
           log "🔍 Performing health check..."
           if sudo systemctl is-active --quiet fastapi-demo.service; then
             log "✅ Service is running successfully!"
+            log "📊 Service status: $(sudo systemctl is-active fastapi-demo.service)"
           else
             log "❌ Service failed to start!"
             sudo systemctl status fastapi-demo.service --no-pager
             exit 1
           fi
           
-          log "🎉 Conda deployment completed successfully!"
+          log "🎉 Deployment completed successfully!"
         ENDSSH
 
     - name: Verify Deployment
       timeout-minutes: 2
       run: |
         echo "🔍 Verifying deployment..."
-        echo "🖥️ Server: ${{ secrets.EC2_INSTANCE_IP }}"
-        echo "👤 User: ${{ secrets.EC2_USER }}"
+        echo "🖥️ Server: $EC2_INSTANCE_IP"
+        echo "👤 User: $EC2_USER"
         sleep 10
 
     - name: Clean up
@@ -137,16 +199,16 @@ jobs:
       if: success()
       run: |
         echo "🎉 Conda deployment completed successfully!"
-        echo "📍 Application is running on: ${{ secrets.EC2_INSTANCE_IP }}"
-        echo "👤 Deployed as user: ${{ secrets.EC2_USER }}"
+        echo "📍 Application is running on: $EC2_INSTANCE_IP"
+        echo "👤 Deployed as user: $EC2_USER"
         echo "⏰ Deployment time: $(date)"
 
     - name: Deployment Failure Notification
       if: failure()
       run: |
         echo "💥 Conda deployment failed!"
-        echo "🖥️ Target server: ${{ secrets.EC2_INSTANCE_IP }}"
-        echo "👤 Target user: ${{ secrets.EC2_USER }}"
+        echo "🖥️ Target server: $EC2_INSTANCE_IP"
+        echo "👤 Target user: $EC2_USER"
         echo "🔍 Check the logs above for error details"
         echo "🕐 Failed at: $(date)"
         exit 1
