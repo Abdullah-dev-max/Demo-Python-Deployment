@@ -1,238 +1,45 @@
-name: Python Package using Conda
+name: Python Package using Conda  
 
-on: [push]
+on: [push]  
 
-jobs:
-  build-and-deploy:
-    runs-on: ubuntu-latest
-    timeout-minutes: 20
-    strategy:
-      max-parallel: 5
+jobs:  
+  build-and-deploy:  
+    runs-on: ubuntu-latest  
+    timeout-minutes: 20  
+    strategy:  
+      max-parallel: 5  
 
-    env:
-      DEPLOY_DIR: /home/ubuntu/demo_python_deployment
-      EC2_INSTANCE_IP: ${{ secrets.EC2_INSTANCE_IP }}
-      EC2_SSH_PRIVATE_KEY: ${{ secrets.EC2_SSH_PRIVATE_KEY }}
-      EC2_USER: ${{ secrets.EC2_USER }}
-      APP_PORT: 8080
-      CONTAINER_NAME: python_app_container
+    env:  
+      DEPLOY_DIR: /home/ubuntu/demo_python_deployment  
+      EC2_INSTANCE_IP: ${{ secrets.EC2_INSTANCE_IP }}  
+      EC2_SSH_PRIVATE_KEY: ${{ secrets.EC2_SSH_PRIVATE_KEY }}  
+      EC2_USER: ${{ secrets.EC2_USER }}  
+      APP_PORT: 8080  
+      CONTAINER_NAME: python_app_container  
 
-    steps:
-    - uses: actions/checkout@v4
-    
-    - name: Set up Python 3.12.11
-      uses: actions/setup-python@v3
-      with:
-        python-version: '3.12.11'
+    steps:  
+    - uses: actions/checkout@v4  
 
-    - name: Set up SSH key
-      run: |
-        echo "$EC2_SSH_PRIVATE_KEY" > private_key
-        chmod 600 private_key
-        echo "✅ SSH key configured successfully"
+    - name: Set up Python 3.12.11  
+      uses: actions/setup-python@v3  
+      with:  
+        python-version: '3.12.11'  
 
-    - name: Test EC2 Connection
-      timeout-minutes: 3
-      run: |
-        echo "🔗 Testing connection to EC2 instance..."
-        echo "🖥️ Target server: $EC2_INSTANCE_IP"
-        echo "👤 Target user: $EC2_USER"
-        
-        # Test SSH connection
-        ssh -o StrictHostKeyChecking=no -o ConnectTimeout=30 -i private_key $EC2_USER@$EC2_INSTANCE_IP << 'ENDSSH'
-          echo "✅ SSH connection successful!"
-          echo "🖥️ Connected to: $(hostname)"
-          echo "👤 Logged in as: $(whoami)"
-          echo "📍 Working directory: $(pwd)"
-          echo "🐧 OS Info: $(lsb_release -d 2>/dev/null || echo "$(uname -s) $(uname -r)")"
-          echo "💾 Disk space: $(df -h / | tail -1 | awk '{print $4}' | sed 's/G/ GB/')"
-          echo "🔧 Python version: $(python3 --version 2>/dev/null || echo "Python not found")"
-        ENDSSH
-        
-        echo "🎉 EC2 connection test completed successfully!"
+    - name: Set up SSH key  
+      run: |  
+        echo "$EC2_SSH_PRIVATE_KEY" > private_key  
+        chmod 600 private_key  
+        echo "✅ SSH key configured successfully"  
 
-    - name: Prepare Environment on EC2
-      timeout-minutes: 8
-      run: |
-        echo "🔧 Preparing environment on EC2..."
-        ssh -o StrictHostKeyChecking=no -o ConnectTimeout=30 -i private_key $EC2_USER@$EC2_INSTANCE_IP << 'ENDSSH'
-          set -e
-          
-          # Function for logging
-          log() {
-            echo "$(date '+%Y-%m-%d %H:%M:%S') - $1"
-          }
-          
-          log "🚀 Starting environment preparation..."
-          
-          # Install miniconda if not present
-          if ! command -v conda &> /dev/null; then
-            log "📦 Installing Miniconda..."
-            cd ~
-            mkdir -p conda
-            cd conda
-            wget https://repo.anaconda.com/miniconda/Miniconda3-latest-Linux-x86_64.sh
-            bash Miniconda3-latest-Linux-x86_64.sh -b -p $HOME/miniconda3
-            export PATH="$HOME/miniconda3/bin:$PATH"
-            source ~/.bashrc
-          else
-            log "✅ Conda already installed"
-          fi
-          
-          # Update system packages
-          log "📦 Installing system dependencies..."
-          sudo apt-get update -qq
-          
-          # Install the correct packages (based on your successful history)
-          sudo apt-get install -y -qq ffmpeg libsm6 libxext6 libgl1-mesa-dev
-          sudo apt-get install -y -qq apt-utils build-essential libglib2.0-0 tesseract-ocr g++
-          
-          # Setup project directory
-          log "📁 Setting up project directory..."
-          cd ~ 
-          mkdir -p git_source_code
-          cd git_source_code
-          
-          # Git operations
-          log "📥 Updating code repository..."
-          if [ ! -d ".git" ]; then
-            git init
-            git remote add origin https://github.com/Astra-Network-Organization/Demo-Python-Deployment.git
-          fi
-          git fetch origin main
-          git reset --hard origin/main
-          
-          # Set permissions
-          log "🔐 Setting permissions..."
-          sudo chmod 777 /home/$EC2_USER/git_source_code || true
-          sudo chmod 777 model || true
-          sudo chmod 777 facial_recognition.py || true
-          
-          log "✅ Environment preparation completed!"
-        ENDSSH
+    # 1️⃣  QUICK CONNECTIVITY CHECK ------------------------------------------------  
+    - name: Test EC2 Connection  
+      timeout-minutes: 3  
+      run: |  
+        ssh -o StrictHostKeyChecking=no -o ConnectTimeout=30 -i private_key $EC2_USER@$EC2_INSTANCE_IP \
+          'echo "✅ SSH OK (host: $(hostname), user: $(whoami))"'  
 
-    - name: Install Dependencies on EC2
-      timeout-minutes: 5
-      run: |
-        echo "📚 Installing dependencies on EC2..."
-        ssh -o StrictHostKeyChecking=no -o ConnectTimeout=30 -i private_key $EC2_USER@$EC2_INSTANCE_IP << 'ENDSSH'
-          set -e
-          
-          # Function for logging
-          log() {
-            echo "$(date '+%Y-%m-%d %H:%M:%S') - $1"
-          }
-          
-          log "🐍 Setting up Conda environment..."
-          cd ~/git_source_code
-          export PATH="$HOME/miniconda3/bin:$PATH"
-          source ~/.bashrc
-          
-          # Create conda environment if it doesn't exist
-          if ! conda env list | grep -q "^kyc "; then
-            log "📦 Creating conda environment 'kyc' with Python 3.12.11..."
-            conda create -n kyc python=3.12.11 -y
-          else
-            log "✅ Conda environment 'kyc' already exists"
-          fi
-          
-          # Activate conda environment
-          source ~/miniconda3/etc/profile.d/conda.sh
-          conda activate kyc
-          
-          # Install dependencies
-          log "📚 Installing Python dependencies..."
-          if [ -f "requirements_CPU.txt" ]; then
-            python -m pip install -r requirements_CPU.txt
-          elif [ -f "requirements.txt" ]; then
-            python -m pip install -r requirements.txt
-          fi
-          
-          # Install opencv separately with specific version
-          log "📚 Installing OpenCV..."
-          pip install opencv-python==4.11.0.86
-          
-          # Install additional packages
-          log "📚 Installing additional packages..."
-          pip install mediapipe tensorflow fastapi qdrant-client google-cloud-vision faiss-cpu uvicorn
-          
-          log "✅ Dependencies installed successfully!"
-        ENDSSH
-
-    - name: Deploy to EC2
-      timeout-minutes: 5
-      run: |
-        echo "🚀 Deploying application to EC2..."
-        ssh -o StrictHostKeyChecking=no -o ConnectTimeout=30 -i private_key $EC2_USER@$EC2_INSTANCE_IP << 'ENDSSH'
-          set -e
-          
-          # Function for logging
-          log() {
-            echo "$(date '+%Y-%m-%d %H:%M:%S') - $1"
-          }
-          
-          log "🚀 Starting final deployment process..."
-          log "👤 Deploying as user: $(whoami)"
-          log "🖥️ Target server: $(hostname)"
-          
-          cd ~/git_source_code
-          export PATH="$HOME/miniconda3/bin:$PATH"
-          source ~/miniconda3/etc/profile.d/conda.sh
-          conda activate kyc
-          
-          # Kill existing uvicorn processes
-          log "🔄 Stopping existing processes..."
-          ps aux | grep uvicorn | grep -v grep | awk '{print $2}' | xargs -r kill -9 || true
-          
-          # Start application
-          log "🚀 Starting application..."
-          nohup uvicorn main:app --host 0.0.0.0 --port ${{ env.APP_PORT }} > uvicorn.log 2>&1 &
-          
-          # Wait for service to start
-          sleep 5
-          
-          # Health check
-          log "🔍 Performing health check..."
-          if ps aux | grep -v grep | grep "uvicorn main:app"; then
-            log "✅ Application is running successfully!"
-            log "📊 Application PID: $(ps aux | grep -v grep | grep "uvicorn main:app" | awk '{print $2}')"
-          else
-            log "❌ Application failed to start!"
-            cat uvicorn.log || true
-            exit 1
-          fi
-          
-          log "🎉 Deployment completed successfully!"
-          log "🌐 Application is running on port ${{ env.APP_PORT }}"
-        ENDSSH
-
-    - name: Verify Deployment
-      timeout-minutes: 2
-      run: |
-        echo "🔍 Verifying deployment..."
-        echo "🖥️ Server: $EC2_INSTANCE_IP"
-        echo "👤 User: $EC2_USER"
-        echo "🌐 Application URL: http://$EC2_INSTANCE_IP:$APP_PORT"
-        sleep 10
-
-    - name: Clean up
-      if: always()
-      run: rm -f private_key
-
-    - name: Deployment Success Notification
-      if: success()
-      run: |
-        echo "🎉 Conda deployment completed successfully!"
-        echo "📍 Application is running on: http://$EC2_INSTANCE_IP:$APP_PORT"
-        echo "👤 Deployed as user: $EC2_USER"
-        echo "⏰ Deployment time: $(date)"
-
-    - name: Deployment Failure Notification
-      if: failure()
-      run: |
-        echo "💥 Conda deployment failed!"
-        echo "🖥️ Target server: $EC2_INSTANCE_IP"
-        echo "👤 Target user: $EC2_USER"
-        echo "🔍 Check the logs above for error details"
-        echo "🕐 Failed at: $(date)"
-        exit 1
+    # 2️⃣  PREPARE INSTANCE  -------------------------------------------------------  
+    - name: Prepare Environment on EC2  
+      timeout-minutes: 10  
+      run: |  
+        ssh -o StrictHostKeyChecking=no -o ConnectTimeout
