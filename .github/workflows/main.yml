@@ -33,7 +33,7 @@ jobs:
     - name: Deploy to EC2
       timeout-minutes: 10
       run: |
-        ssh -o StrictHostKeyChecking=no -o ConnectTimeout=30 -i private_key ubuntu@${{ secrets.EC2_INSTANCE_IP }} << 'ENDSSH'
+        ssh -o StrictHostKeyChecking=no -o ConnectTimeout=30 -i private_key ${{ secrets.EC2_USER }}@${{ secrets.EC2_INSTANCE_IP }} << 'ENDSSH'
           set -e
           
           # Function for logging
@@ -42,6 +42,8 @@ jobs:
           }
           
           log "🚀 Starting conda deployment process..."
+          log "👤 Deploying as user: $(whoami)"
+          log "🖥️ Target server: ${{ secrets.EC2_INSTANCE_IP }}"
           
           # Install miniconda if not present
           if ! command -v conda &> /dev/null; then
@@ -123,6 +125,8 @@ jobs:
       timeout-minutes: 2
       run: |
         echo "🔍 Verifying deployment..."
+        echo "🖥️ Server: ${{ secrets.EC2_INSTANCE_IP }}"
+        echo "👤 User: ${{ secrets.EC2_USER }}"
         sleep 10
 
     - name: Clean up
@@ -134,12 +138,15 @@ jobs:
       run: |
         echo "🎉 Conda deployment completed successfully!"
         echo "📍 Application is running on: ${{ secrets.EC2_INSTANCE_IP }}"
+        echo "👤 Deployed as user: ${{ secrets.EC2_USER }}"
         echo "⏰ Deployment time: $(date)"
 
     - name: Deployment Failure Notification
       if: failure()
       run: |
         echo "💥 Conda deployment failed!"
+        echo "🖥️ Target server: ${{ secrets.EC2_INSTANCE_IP }}"
+        echo "👤 Target user: ${{ secrets.EC2_USER }}"
         echo "🔍 Check the logs above for error details"
         echo "🕐 Failed at: $(date)"
         exit 1
