@@ -10,36 +10,61 @@ jobs:
       max-parallel: 5  
 
     env:  
-      DEPLOY_DIR: /home/ubuntu/demo_python_deployment  
-      EC2_INSTANCE_IP: ${{ secrets.EC2_INSTANCE_IP }}  
+      DEPLOY_DIR: /home/ubuntu/demo_python_deployment   # one single root dir  
+      EC2_INSTANCE_IP:   ${{ secrets.EC2_INSTANCE_IP }}  
       EC2_SSH_PRIVATE_KEY: ${{ secrets.EC2_SSH_PRIVATE_KEY }}  
-      EC2_USER: ${{ secrets.EC2_USER }}  
+      EC2_USER:          ${{ secrets.EC2_USER }}  
       APP_PORT: 8080  
       CONTAINER_NAME: python_app_container  
 
     steps:  
     - uses: actions/checkout@v4  
 
-    - name: Set up Python 3.12.11  
+    - name: Set up Python 3.12.11 for CI job  
       uses: actions/setup-python@v3  
-      with:  
-        python-version: '3.12.11'  
+      with: { python-version: '3.12.11' }  
 
+    #####################################################################  
+    # SSH key – written to a file that the ssh client can read  
+    #####################################################################  
     - name: Set up SSH key  
       run: |  
         echo "$EC2_SSH_PRIVATE_KEY" > private_key  
         chmod 600 private_key  
-        echo "✅ SSH key configured successfully"  
+        echo "✅ SSH key configured"  
 
-    # 1️⃣  QUICK CONNECTIVITY CHECK ------------------------------------------------  
-    - name: Test EC2 Connection  
+    #####################################################################  
+    # 1. Smoke-test connectivity  
+    #####################################################################  
+    - name: Test EC2 connection  
       timeout-minutes: 3  
       run: |  
-        ssh -o StrictHostKeyChecking=no -o ConnectTimeout=30 -i private_key $EC2_USER@$EC2_INSTANCE_IP \
-          'echo "✅ SSH OK (host: $(hostname), user: $(whoami))"'  
+        ssh -o StrictHostKeyChecking=no -o ConnectTimeout=30 \
+            -i private_key "$EC2_USER@$EC2_INSTANCE_IP" \
+            'echo "✅ SSH OK (host: $(hostname), user: $(whoami))"'  
 
-    # 2️⃣  PREPARE INSTANCE  -------------------------------------------------------  
-    - name: Prepare Environment on EC2  
+    #####################################################################  
+    # 2. Prepare the instance  –– Safe Miniconda + packages + source code  
+    #####################################################################  
+    - name: Prepare environment on EC2  
       timeout-minutes: 10  
       run: |  
-        ssh -o StrictHostKeyChecking=no -o ConnectTimeout
+        ssh -o StrictHostKeyChecking=no -o ConnectTimeout=30 \
+            -i private_key "$EC2_USER@$EC2_INSTANCE_IP" << 'ENDSSH'  
+          set -e  
+          log(){ echo "$(date '+%F %T')  $*"; }  
+
+          ############  Safe Miniconda install / update  #################  
+          INSTALLER_URL="https://repo.anaconda.com/miniconda/Miniconda3-latest-Linux-x86_64.sh"  
+          INSTALL_PATH="$HOME/miniconda3"  
+
+          log "📦 Checking Miniconda …"  
+          wget -q "$INSTALLER_URL" -O /tmp/miniconda.sh  
+          if [ -d "$INSTALL_PATH" ]; then  
+            log "🔄 Updating existing Miniconda"  
+            bash /tmp/miniconda.sh -b -u -p "$INSTALL_PATH"  
+          else  
+            log "🆕 Fresh Miniconda install"  
+            bash /tmp/miniconda.sh -b -p "$INSTALL_PATH"  
+          fi  
+          source "$INSTALL_PATH/etc/profile.d/conda.sh
