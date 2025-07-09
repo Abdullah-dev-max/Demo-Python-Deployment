@@ -79,10 +79,13 @@ jobs:
             log "✅ Conda already installed"
           fi
           
-          # Update system packages (only if needed)
+          # Update system packages
           log "📦 Installing system dependencies..."
           sudo apt-get update -qq
-          sudo apt-get install -y -qq ffmpeg libsm6 libxext6 libgl1-mesa-dev apt-utils build-essential libgl1-mesa-glx libglib2.0-0 tesseract-ocr g++
+          
+          # Install the correct packages (based on your successful history)
+          sudo apt-get install -y -qq ffmpeg libsm6 libxext6 libgl1-mesa-dev
+          sudo apt-get install -y -qq apt-utils build-essential libglib2.0-0 tesseract-ocr g++
           
           # Setup project directory
           log "📁 Setting up project directory..."
@@ -101,7 +104,7 @@ jobs:
           
           # Set permissions
           log "🔐 Setting permissions..."
-          sudo chmod 777 git_source_code || true
+          sudo chmod 777 /home/$EC2_USER/git_source_code || true
           sudo chmod 777 model || true
           sudo chmod 777 facial_recognition.py || true
           
@@ -134,6 +137,7 @@ jobs:
           fi
           
           # Activate conda environment
+          source ~/miniconda3/etc/profile.d/conda.sh
           conda activate kyc
           
           # Install dependencies
@@ -144,9 +148,12 @@ jobs:
             python -m pip install -r requirements.txt
           fi
           
+          # Install opencv separately with specific version
+          log "📚 Installing OpenCV..."
+          pip install opencv-python==4.11.0.86
+          
           # Install additional packages
           log "📚 Installing additional packages..."
-          pip install opencv-python==4.11.0.86
           pip install mediapipe tensorflow fastapi qdrant-client google-cloud-vision faiss-cpu uvicorn
           
           log "✅ Dependencies installed successfully!"
@@ -170,7 +177,7 @@ jobs:
           
           cd ~/git_source_code
           export PATH="$HOME/miniconda3/bin:$PATH"
-          source ~/.bashrc
+          source ~/miniconda3/etc/profile.d/conda.sh
           conda activate kyc
           
           # Kill existing uvicorn processes
