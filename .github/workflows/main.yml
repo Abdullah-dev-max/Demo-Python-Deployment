@@ -19,18 +19,81 @@ jobs:
         run: |
           ssh -o StrictHostKeyChecking=no -i private_key ubuntu@${{ secrets.EC2_INSTANCE_IP }} << 'ENDSSH'
             set -e
+            
+            # Update system packages
+            echo "Updating system packages..."
+            sudo apt-get update
+            
+            # Install required system packages
+            echo "Installing system dependencies..."
+            sudo apt-get install -y apt-utils build-essential libgl1-mesa-glx libglib2.0-0 tesseract-ocr g++
+            
+            # Create directory if it doesn't exist
+            echo "Setting up project directory..."
+            mkdir -p ~/Demo-Python-Deployment
             cd ~/Demo-Python-Deployment || { echo "Directory not found"; exit 1; }
-            git remote set-url origin git@github.com:Astra-Network-Organization/Demo-Python-Deployment.git
-            git pull origin main
-            python3 -m venv venv
+            
+            # Initialize git repository if needed
+            if [ ! -d ".git" ]; then
+              echo "Initializing git repository..."
+              git init
+              git remote add origin git@github.com:Astra-Network-Organization/Demo-Python-Deployment.git
+            else
+              echo "Updating git remote..."
+              git remote set-url origin git@github.com:Astra-Network-Organization/Demo-Python-Deployment.git
+            fi
+            
+            # Pull latest code
+            echo "Pulling latest code..."
+            git fetch origin main
+            git reset --hard origin/main
+            
+            # Create virtual environment if it doesn't exist
+            echo "Setting up Python virtual environment..."
+            if [ ! -d "venv" ]; then
+              python3 -m venv venv
+            fi
+            
+            # Activate virtual environment
+            echo "Activating virtual environment..."
             source venv/bin/activate
-            pip install -r requirements.txt
+            
+            # Upgrade pip
+            echo "Upgrading pip..."
+            pip install --upgrade pip
+            
+            # Install Python dependencies
+            echo "Installing Python dependencies..."
+            if [ -f "requirements.txt" ]; then
+              pip install -r requirements.txt
+            fi
             pip install mediapipe tensorflow opencv-python fastapi qdrant-client google-cloud-vision faiss-cpu
+            
+            # Reload systemd and manage service
+            echo "Managing systemd service..."
             sudo systemctl daemon-reload
             sudo systemctl enable fastapi-demo.service
             sudo systemctl restart fastapi-demo.service
+            
+            # Check service status
+            echo "Checking service status..."
+            sudo systemctl status fastapi-demo.service --no-pager
+            
+            echo "Deployment completed successfully!"
           ENDSSH
 
       - name: Clean up
         if: always()
         run: rm -f private_key
+
+      - name: Deployment Status
+        if: success()
+        run: |
+          echo "🚀 Deployment completed successfully!"
+          echo "Application is running on: ${{ secrets.EC2_INSTANCE_IP }}"
+
+      - name: Deployment Failed
+        if: failure()
+        run: |
+          echo "❌ Deployment failed!"
+          echo "Check the logs above for error details."
