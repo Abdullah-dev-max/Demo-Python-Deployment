@@ -19,7 +19,7 @@ jobs:
     - name: Set up Python
       uses: actions/setup-python@v5
       with:
-        python-version: '3.12.11'
+        python-version: '3.12'
 
     - name: Check GPU availability (Optional)
       run: |
@@ -31,31 +31,25 @@ jobs:
           echo "No GPU detected or nvidia-smi not available. Continuing without GPU..."
         fi
 
+    - name: Verify requirements file exists
+      run: |
+        if [ -f "requirements_GPU.txt" ]; then
+          echo "requirements_GPU.txt found"
+          cat requirements_GPU.txt
+        else
+          echo "requirements_GPU.txt not found. Listing directory contents:"
+          ls -la
+        fi
+
     - name: Install GPU dependencies
       run: |
         python -m pip install --upgrade pip
-        pip install -r requirements_GPU.txt
+        if [ -f "requirements_GPU.txt" ]; then
+          pip install -r requirements_GPU.txt
+        else
+          echo "requirements_GPU.txt not found, skipping dependency installation"
+          exit 1
+        fi
 
     - name: Display Project Structure (Optional, for debugging)
       run: ls -R
-
-  # --- Deployment Job (Requires more information) ---
-  # deploy:
-  #   needs: build-only
-  #   runs-on: ubuntu-latest
-  #   environment: production
-  #   if: github.ref == 'refs/heads/main'
-  #   steps:
-  #     - name: Checkout repository
-  #       uses: actions/checkout@v4
-  #     - name: Set up Python
-  #       uses: actions/setup-python@v5
-  #       with:
-  #         python-version: '3.9'
-  #     - name: Install GPU dependencies
-  #       run: |
-  #         python -m pip install --upgrade pip
-  #         pip install -r requirements_GPU.txt
-  #     - name: Deploy to Target Environment
-  #       run: |
-  #         echo "Add your deployment commands here."
