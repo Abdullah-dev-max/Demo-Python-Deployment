@@ -19,19 +19,22 @@ jobs:
     - name: Set up Python
       uses: actions/setup-python@v5
       with:
-        python-version: '3.9' # Or your desired Python version
+        python-version: '3.9'
 
-    - name: Install CPU dependencies
+    - name: Check GPU availability (Optional)
+      run: |
+        echo "Checking GPU availability..."
+        if command -v nvidia-smi &> /dev/null; then
+          nvidia-smi
+          echo "GPU detected and working!"
+        else
+          echo "No GPU detected or nvidia-smi not available. Continuing without GPU..."
+        fi
+
+    - name: Install GPU dependencies
       run: |
         python -m pip install --upgrade pip
-        # ----------------------------------------------------------------------
-        # FIX HERE: Adjust the path to requirements_CPU.txt if it's in a subdirectory.
-        # Examples:
-        # If requirements_CPU.txt is in a 'src' folder: pip install -r src/requirements_CPU.txt
-        # If requirements_CPU.txt is in a 'config' folder: pip install -r config/requirements_CPU.txt
-        # If it's in the root (and you still got the error), double check its exact name in your repo.
-        # ----------------------------------------------------------------------
-        pip install -r requirements_CPU.txt # KEEP THIS LINE, BUT MODIFY THE PATH if needed!
+        pip install -r requirements_GPU.txt
 
     - name: Display Project Structure (Optional, for debugging)
       run: ls -R
@@ -49,8 +52,10 @@ jobs:
   #       uses: actions/setup-python@v5
   #       with:
   #         python-version: '3.9'
-  #     - name: Install Deployment Dependencies (if any)
-  #       run: pip install some-deployment-tool
+  #     - name: Install GPU dependencies
+  #       run: |
+  #         python -m pip install --upgrade pip
+  #         pip install -r requirements_GPU.txt
   #     - name: Deploy to Target Environment
   #       run: |
   #         echo "Add your deployment commands here."
