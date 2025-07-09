@@ -78,8 +78,16 @@ jobs:
           # Navigate to project directory
           cd ~/Demo-Python-Deployment || { echo "Directory not found"; exit 1; }
           
-          # Configure git (use HTTPS instead of SSH to avoid key issues)
-          git remote set-url origin https://github.com/Astra-Network-Organization/Demo-Python-Deployment.git
+          # Configure git with personal access token for authentication
+          git config --global credential.helper store
+          
+          # Set up authenticated URL with personal access token
+          git remote set-url origin https://${{ secrets.GITHUB_TOKEN }}@github.com/Astra-Network-Organization/Demo-Python-Deployment.git
+          
+          # Alternative: Use a personal access token if GITHUB_TOKEN doesn't work
+          # git remote set-url origin https://${{ secrets.GITHUB_PERSONAL_TOKEN }}@github.com/Astra-Network-Organization/Demo-Python-Deployment.git
+          
+          # Pull latest changes
           git pull origin main
           
           # Setup Python virtual environment
