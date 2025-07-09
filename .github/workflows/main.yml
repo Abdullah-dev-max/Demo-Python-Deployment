@@ -26,18 +26,14 @@ jobs:
         echo "$EC2_SSH_PRIVATE_KEY" > private_key  
         chmod 600 private_key  
 
-    # ---------------------------------------------------------------  
-    # 1. Smoke test  
-    # ---------------------------------------------------------------  
+    # 1. Connectivity smoke test -------------------------------------------------  
     - name: Test EC2 connection  
       run: |  
         ssh -o StrictHostKeyChecking=no -o ConnectTimeout=30 \
             -i private_key "$EC2_USER@$EC2_INSTANCE_IP" \
             'echo "✅ SSH OK (host: $(hostname), user: $(whoami))"'  
 
-    # ---------------------------------------------------------------  
-    # 2. Prepare instance  (FIXED quoting + variables passed in front)  
-    # ---------------------------------------------------------------  
+    # 2. Prepare instance --------------------------------------------------------  
     - name: Prepare environment on EC2  
       run: |  
         DEPLOY_DIR="$DEPLOY_DIR" \
@@ -46,9 +42,7 @@ jobs:
           set -e  
           log(){ echo "$(date '+%F %T')  $*"; }  
 
-          ###################################################################  
-          # Safe Miniconda install / update  
-          ###################################################################  
+          # ---------- Safe Miniconda install / update ---------------------------  
           INSTALLER_URL="https://repo.anaconda.com/miniconda/Miniconda3-latest-Linux-x86_64.sh"  
           INSTALL_PATH="$HOME/miniconda3"  
 
@@ -61,22 +55,18 @@ jobs:
             log "🆕 Fresh Miniconda install"  
             bash /tmp/miniconda.sh -b -p "$INSTALL_PATH"  
           fi  
-          source "$INSTALL_PATH/etc/profile.d/conda.sh"  
+          source "$INSTALL_PATH/etc/profile.d/conda.sh"   # ‹FIXED› closing quote  
           export PATH="$INSTALL_PATH/bin:$PATH"  
           log "✅ Miniconda ready: $(conda --version)"  
 
-          ###################################################################  
-          # System packages  
-          ###################################################################  
+          # ---------- System packages ------------------------------------------  
           log "📦 Installing apt packages"  
           sudo apt-get update -qq  
           sudo apt-get install -y -qq \
             ffmpeg libsm6 libxext6 libgl1-mesa-dev \
             apt-utils build-essential libglib2.0-0 tesseract-ocr g++  
 
-          ###################################################################  
-          # Source code  
-          ###################################################################  
+          # ---------- Source code ----------------------------------------------  
           SRC_DIR="$DEPLOY_DIR"  
           log "📁 Syncing repo to $SRC_DIR"  
           if [ ! -d "$SRC_DIR/.git" ]; then  
@@ -90,7 +80,10 @@ jobs:
           log "✅ Environment prepared"  
         ENDSSH  
 
-    # ---------------------------------------------------------------  
-    # 3. Python dependencies  
-    # ---------------------------------------------------------------  
-    - name: Install Python dependencies on EC2
+    # 3. Python dependencies -----------------------------------------------------  
+    - name: Install Python dependencies on EC2  
+      run: |  
+        DEPLOY_DIR="$DEPLOY_DIR" \
+        APP_PORT="$APP_PORT" \
+        ssh -o StrictHostKeyChecking=no -o ConnectTimeout=30 \
+            -i private_key "$EC2_USER@$EC2_INSTANCE_IP" <<'ENDSSH'
