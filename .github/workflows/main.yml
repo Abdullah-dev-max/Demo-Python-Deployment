@@ -10,17 +10,20 @@ jobs:
       max-parallel: 5
 
     env:
+      DEPLOY_DIR: /home/ubuntu/demo_python_deployment
       EC2_INSTANCE_IP: ${{ secrets.EC2_INSTANCE_IP }}
       EC2_SSH_PRIVATE_KEY: ${{ secrets.EC2_SSH_PRIVATE_KEY }}
       EC2_USER: ${{ secrets.EC2_USER }}
+      APP_PORT: 8080
+      CONTAINER_NAME: python_app_container
 
     steps:
     - uses: actions/checkout@v4
     
-    - name: Set up Python 3.10
+    - name: Set up Python 3.12.11
       uses: actions/setup-python@v3
       with:
-        python-version: '3.10'
+        python-version: '3.12.11'
         
     - name: Add conda to system path
       run: |
