@@ -1,24 +1,3 @@
-Skip to content
-Navigation Menu
-Abdullah-dev-max
-Demo-Python-Deployment
-
-Type / to search
-Code
-Issues
-Pull requests
-Actions
-Projects
-Wiki
-Security
-Insights
-Settings
-Python CI/CD
-Update main rt1.yml #10
-Jobs
-Run details
-Workflow file for this run
-.github/workflows/main.yml at 9cc4b51
 name: Python CI/CD
 
 on:
