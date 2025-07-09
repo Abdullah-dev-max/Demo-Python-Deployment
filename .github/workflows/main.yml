@@ -6,59 +6,53 @@ jobs:
   build-and-deploy:  
     runs-on: ubuntu-latest  
     timeout-minutes: 20  
-    strategy:  
-      max-parallel: 5  
 
     env:  
-      DEPLOY_DIR: /home/ubuntu/demo_python_deployment   # one single root dir  
+      DEPLOY_DIR: /home/ubuntu/demo_python_deployment  
       EC2_INSTANCE_IP:   ${{ secrets.EC2_INSTANCE_IP }}  
       EC2_SSH_PRIVATE_KEY: ${{ secrets.EC2_SSH_PRIVATE_KEY }}  
       EC2_USER:          ${{ secrets.EC2_USER }}  
       APP_PORT: 8080  
-      CONTAINER_NAME: python_app_container  
 
     steps:  
     - uses: actions/checkout@v4  
 
-    - name: Set up Python 3.12.11 for CI job  
+    - name: Set up Python 3.12.11 (CI side)  
       uses: actions/setup-python@v3  
       with: { python-version: '3.12.11' }  
 
-    #####################################################################  
-    # SSH key – written to a file that the ssh client can read  
-    #####################################################################  
-    - name: Set up SSH key  
+    - name: Write SSH key  
       run: |  
         echo "$EC2_SSH_PRIVATE_KEY" > private_key  
         chmod 600 private_key  
-        echo "✅ SSH key configured"  
 
-    #####################################################################  
-    # 1. Smoke-test connectivity  
-    #####################################################################  
+    # ---------------------------------------------------------------  
+    # 1. Smoke test  
+    # ---------------------------------------------------------------  
     - name: Test EC2 connection  
-      timeout-minutes: 3  
       run: |  
         ssh -o StrictHostKeyChecking=no -o ConnectTimeout=30 \
             -i private_key "$EC2_USER@$EC2_INSTANCE_IP" \
             'echo "✅ SSH OK (host: $(hostname), user: $(whoami))"'  
 
-    #####################################################################  
-    # 2. Prepare the instance  –– Safe Miniconda + packages + source code  
-    #####################################################################  
+    # ---------------------------------------------------------------  
+    # 2. Prepare instance  (FIXED quoting + variables passed in front)  
+    # ---------------------------------------------------------------  
     - name: Prepare environment on EC2  
-      timeout-minutes: 10  
       run: |  
+        DEPLOY_DIR="$DEPLOY_DIR" \
         ssh -o StrictHostKeyChecking=no -o ConnectTimeout=30 \
-            -i private_key "$EC2_USER@$EC2_INSTANCE_IP" << 'ENDSSH'  
+            -i private_key "$EC2_USER@$EC2_INSTANCE_IP" <<'ENDSSH'  
           set -e  
           log(){ echo "$(date '+%F %T')  $*"; }  
 
-          ############  Safe Miniconda install / update  #################  
+          ###################################################################  
+          # Safe Miniconda install / update  
+          ###################################################################  
           INSTALLER_URL="https://repo.anaconda.com/miniconda/Miniconda3-latest-Linux-x86_64.sh"  
           INSTALL_PATH="$HOME/miniconda3"  
 
-          log "📦 Checking Miniconda …"  
+          log "📦 Checking Miniconda…"  
           wget -q "$INSTALLER_URL" -O /tmp/miniconda.sh  
           if [ -d "$INSTALL_PATH" ]; then  
             log "🔄 Updating existing Miniconda"  
@@ -67,4 +61,36 @@ jobs:
             log "🆕 Fresh Miniconda install"  
             bash /tmp/miniconda.sh -b -p "$INSTALL_PATH"  
           fi  
-          source "$INSTALL_PATH/etc/profile.d/conda.sh
+          source "$INSTALL_PATH/etc/profile.d/conda.sh"  
+          export PATH="$INSTALL_PATH/bin:$PATH"  
+          log "✅ Miniconda ready: $(conda --version)"  
+
+          ###################################################################  
+          # System packages  
+          ###################################################################  
+          log "📦 Installing apt packages"  
+          sudo apt-get update -qq  
+          sudo apt-get install -y -qq \
+            ffmpeg libsm6 libxext6 libgl1-mesa-dev \
+            apt-utils build-essential libglib2.0-0 tesseract-ocr g++  
+
+          ###################################################################  
+          # Source code  
+          ###################################################################  
+          SRC_DIR="$DEPLOY_DIR"  
+          log "📁 Syncing repo to $SRC_DIR"  
+          if [ ! -d "$SRC_DIR/.git" ]; then  
+            mkdir -p "$SRC_DIR"  
+            git clone https://github.com/Abdullah-dev-max/Demo-Python-Deployment.git "$SRC_DIR"  
+          else  
+            cd "$SRC_DIR"  
+            git fetch origin main  
+            git reset --hard origin/main  
+          fi  
+          log "✅ Environment prepared"  
+        ENDSSH  
+
+    # ---------------------------------------------------------------  
+    # 3. Python dependencies  
+    # ---------------------------------------------------------------  
+    - name: Install Python dependencies on EC2
