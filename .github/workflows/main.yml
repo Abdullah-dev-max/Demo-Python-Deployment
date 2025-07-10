@@ -2,7 +2,7 @@ name: Deploy FastAPI Facial Recognition App
 
 on:
   push:
-    branches: [ main ]  # Trigger on pushes to main branch
+    branches: [ main ]
   pull_request:
     branches: [ main ]
 
@@ -22,43 +22,45 @@ jobs:
           python-version: "3.12"
 
       # ----------------------------------
-      # 2. Install Dependencies
+      # 2. Install Dependencies (FIXED)
       # ----------------------------------
       - name: Install System Dependencies
         run: |
           sudo apt update
-          sudo apt install -y libgl1-mesa-glx  # OpenCV dependency
+          sudo apt install -y libgl1 libgl1-mesa-dev  # Replaces libgl1-mesa-glx
+          sudo apt install -y ffmpeg  # Often needed for OpenCV video I/O
 
       - name: Install Python Dependencies
         run: |
           python -m pip install --upgrade pip
           pip install -r requirements_CPU.txt
-          pip install pytest  # For testing (optional)
+          pip install pytest
 
       # ----------------------------------
       # 3. Run Tests (Optional)
       # ----------------------------------
       - name: Run Unit Tests
         run: |
-          pytest tests/  # Replace with your test directory
+          pytest tests/
 
       # ----------------------------------
-      # 4. Deploy to Production Server (SSH)
+      # 4. Deploy to Production (SSH)
       # ----------------------------------
       - name: Deploy via SSH
-        if: github.ref == 'refs/heads/main'  # Only deploy on main branch
+        if: github.ref == 'refs/heads/main'
         uses: appleboy/ssh-action@v1
         with:
-          host: ${{ secrets.SSH_HOST }}       # e.g., 'your-server-ip'
-          username: ${{ secrets.SSH_USER }}   # e.g., 'ubuntu'
-          key: ${{ secrets.SSH_PRIVATE_KEY }} # GitHub secret with SSH key
+          host: ${{ secrets.SSH_HOST }}
+          username: ${{ secrets.SSH_USER }}
+          key: ${{ secrets.SSH_PRIVATE_KEY }}
           script: |
             cd /home/ubuntu/Astra/KYC
             git fetch --all
             git reset --hard origin/main
-            conda activate kyc || (conda create -n kyc python=3.12.9 -y && conda activate kyc)
+            # Use conda or venv (ensure Python 3.12 is available on the server)
+            conda activate kyc || (conda create -n kyc python=3.12 -y && conda activate kyc)
             pip install -r requirements_CPU.txt
-            # Kill existing Uvicorn process
+            # Kill existing Uvicorn process gracefully
             pkill -f "uvicorn main:app" || true
-            # Start new instance
+            # Start new instance with nohup
             nohup uvicorn main:app --host 0.0.0.0 --port 8080 > uvicorn.log 2>&1 &
