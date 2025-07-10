@@ -10,23 +10,53 @@ jobs:
   test-and-deploy:
     runs-on: ubuntu-latest
     steps:
-      # ... (previous steps remain the same) ...
+      # ----------------------------------
+      # 1. Checkout Code & Set Up Python
+      # ----------------------------------
+      - name: Checkout Repository
+        uses: actions/checkout@v4
+
+      - name: Set up Python 3.12
+        uses: actions/setup-python@v4
+        with:
+          python-version: "3.12.9"  # Matches developer's version
 
       # ----------------------------------
-      # 3. Verify EC2 SSH Connection
+      # 2. Install System Dependencies
       # ----------------------------------
-      - name: Test EC2 SSH Access
-        if: github.ref == 'refs/heads/main'
+      - name: Install System Dependencies
         run: |
-          echo "${{ secrets.EC2_SSH_PRIVATE_KEY }}" > ./deploy_key.pem
-          chmod 400 ./deploy_key.pem
-          ssh -i ./deploy_key.pem \
-              -o StrictHostKeyChecking=no \
-              ${{ secrets.EC2_USER }}@${{ secrets.EC2_INSTANCE_IP }} \
-              "echo 'Successfully connected to EC2!'"
+          sudo apt update
+          sudo apt install -y libgl1 libgl1-mesa-dev ffmpeg git
 
       # ----------------------------------
-      # 4. Deploy to Production (SSH)
+      # 3. Install Miniconda (Like Developer Did)
+      # ----------------------------------
+      - name: Install Miniconda
+        run: |
+          wget https://repo.anaconda.com/miniconda/Miniconda3-latest-Linux-x86_64.sh -O miniconda.sh
+          bash miniconda.sh -b -p $HOME/miniconda
+          echo "$HOME/miniconda/bin" >> $GITHUB_PATH
+
+      # ----------------------------------
+      # 4. Create Conda Environment (kyc)
+      # ----------------------------------
+      - name: Set up Conda Environment
+        run: |
+          conda create -n kyc python=3.12.9 -y
+          source activate kyc
+          pip install -r requirements_CPU.txt
+
+      # ----------------------------------
+      # 5. Test OpenCV Installation
+      # ----------------------------------
+      - name: Verify OpenCV
+        run: |
+          source activate kyc
+          python -c "import cv2; print(f'OpenCV version: {cv2.__version__}')"
+
+      # ----------------------------------
+      # 6. Deploy to EC2 (SSH)
       # ----------------------------------
       - name: Deploy via SSH
         if: github.ref == 'refs/heads/main'
@@ -36,10 +66,30 @@ jobs:
           username: ${{ secrets.EC2_USER }}
           key: ${{ secrets.EC2_SSH_PRIVATE_KEY }}
           script: |
+            # Clean up previous deployment (like developer did)
+            sudo rm -rf /home/ubuntu/Astra
+            mkdir -p /home/ubuntu/Astra/KYC
             cd /home/ubuntu/Astra/KYC
-            git fetch --all
-            git reset --hard origin/main
-            conda activate kyc || (conda create -n kyc python=3.12 -y && conda activate kyc)
+
+            # Clone fresh code
+            git clone https://github.com/your-repo/Astra/KYC.git .
+
+            # Set up Conda (exact steps from developer)
+            if ! command -v conda &> /dev/null; then
+              wget https://repo.anaconda.com/miniconda/Miniconda3-latest-Linux-x86_64.sh -O miniconda.sh
+              bash miniconda.sh -b -p $HOME/miniconda
+              export PATH="$HOME/miniconda/bin:$PATH"
+            fi
+            source ~/.bashrc
+            conda activate kyc || (conda create -n kyc python=3.12.9 -y && conda activate kyc)
             pip install -r requirements_CPU.txt
+
+            # Kill existing Uvicorn process (developer used pkill)
             pkill -f "uvicorn main:app" || true
+
+            # Start new instance (same as developer)
             nohup uvicorn main:app --host 0.0.0.0 --port 8080 > uvicorn.log 2>&1 &
+
+            # Verify deployment
+            sleep 5
+            curl -s http://localhost:8080 | grep "Welcome" || echo "Deployment failed!"
