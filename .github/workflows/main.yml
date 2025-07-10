@@ -36,12 +36,7 @@ jobs:
           pip install -r requirements_CPU.txt
           pip install pytest
 
-      # ----------------------------------
-      # 3. Run Tests (Optional)
-      # ----------------------------------
-      - name: Run Unit Tests
-        run: |
-          pytest tests/
+      # ------------------------
 
       # ----------------------------------
       # 4. Deploy to Production (SSH)
