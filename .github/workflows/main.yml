@@ -1,95 +1,30 @@
-name: Deploy FastAPI Facial Recognition App
+- name: Deploy via SSH
+  uses: appleboy/ssh-action@v1
+  with:
+    host: ${{ secrets.EC2_INSTANCE_IP }}
+    username: ${{ secrets.EC2_USER }}
+    key: ${{ secrets.EC2_SSH_PRIVATE_KEY }}
+    script: |
+      # Clean up and clone fresh code
+      sudo rm -rf /home/ubuntu/Astra
+      mkdir -p /home/ubuntu/Astra/KYC
+      cd /home/ubuntu/Astra/KYC
+      git clone https://github.com/your-repo/Astra/KYC.git .
 
-on:
-  push:
-    branches: [ main ]
-  pull_request:
-    branches: [ main ]
+      # Set up Conda
+      export PATH="$HOME/miniconda/bin:$PATH"
+      eval "$(conda shell.bash hook)"
+      conda init bash
+      source ~/.bashrc
+      conda activate kyc || (conda create -n kyc python=3.12.9 -y && conda activate kyc)
 
-jobs:
-  test-and-deploy:
-    runs-on: ubuntu-latest
-    steps:
-      # ----------------------------------
-      # 1. Checkout Code & Set Up Python
-      # ----------------------------------
-      - name: Checkout Repository
-        uses: actions/checkout@v4
+      # Install dependencies
+      if [ ! -f requirements_CPU.txt ]; then
+        echo "Error: requirements_CPU.txt missing!"
+        exit 1
+      fi
+      pip install -r requirements_CPU.txt
 
-      - name: Set up Python 3.12
-        uses: actions/setup-python@v4
-        with:
-          python-version: "3.12.9"  # Matches developer's version
-
-      # ----------------------------------
-      # 2. Install System Dependencies
-      # ----------------------------------
-      - name: Install System Dependencies
-        run: |
-          sudo apt update
-          sudo apt install -y libgl1 libgl1-mesa-dev ffmpeg git
-
-      # ----------------------------------
-      # 3. Install Miniconda (Like Developer Did)
-      # ----------------------------------
-      - name: Install Miniconda
-        run: |
-          wget https://repo.anaconda.com/miniconda/Miniconda3-latest-Linux-x86_64.sh -O miniconda.sh
-          bash miniconda.sh -b -p $HOME/miniconda
-          echo "$HOME/miniconda/bin" >> $GITHUB_PATH
-
-      # ----------------------------------
-      # 4. Create Conda Environment (kyc)
-      # ----------------------------------
-      - name: Set up Conda Environment
-        run: |
-          conda create -n kyc python=3.12.9 -y
-          source activate kyc
-          pip install -r requirements_CPU.txt
-
-      # ----------------------------------
-      # 5. Test OpenCV Installation
-      # ----------------------------------
-      - name: Verify OpenCV
-        run: |
-          source activate kyc
-          python -c "import cv2; print(f'OpenCV version: {cv2.__version__}')"
-
-      # ----------------------------------
-      # 6. Deploy to EC2 (SSH)
-      # ----------------------------------
-      - name: Deploy via SSH
-        if: github.ref == 'refs/heads/main'
-        uses: appleboy/ssh-action@v1
-        with:
-          host: ${{ secrets.EC2_INSTANCE_IP }}
-          username: ${{ secrets.EC2_USER }}
-          key: ${{ secrets.EC2_SSH_PRIVATE_KEY }}
-          script: |
-            # Clean up previous deployment (like developer did)
-            sudo rm -rf /home/ubuntu/Astra
-            mkdir -p /home/ubuntu/Astra/KYC
-            cd /home/ubuntu/Astra/KYC
-
-            # Clone fresh code
-            git clone https://github.com/your-repo/Astra/KYC.git .
-
-            # Set up Conda (exact steps from developer)
-            if ! command -v conda &> /dev/null; then
-              wget https://repo.anaconda.com/miniconda/Miniconda3-latest-Linux-x86_64.sh -O miniconda.sh
-              bash miniconda.sh -b -p $HOME/miniconda
-              export PATH="$HOME/miniconda/bin:$PATH"
-            fi
-            source ~/.bashrc
-            conda activate kyc || (conda create -n kyc python=3.12.9 -y && conda activate kyc)
-            pip install -r requirements_CPU.txt
-
-            # Kill existing Uvicorn process (developer used pkill)
-            pkill -f "uvicorn main:app" || true
-
-            # Start new instance (same as developer)
-            nohup uvicorn main:app --host 0.0.0.0 --port 8080 > uvicorn.log 2>&1 &
-
-            # Verify deployment
-            sleep 5
-            curl -s http://localhost:8080 | grep "Welcome" || echo "Deployment failed!"
+      # Restart Uvicorn
+      pkill -f "uvicorn main:app" || true
+      nohup uvicorn main:app --host 0.0.0.0 --port 8080 > uvicorn.log 2>&1 &
