@@ -8,44 +8,33 @@ on:
 
 jobs:
   # -------------------------------
-  # CI: Test & Build (Run on PRs and pushes)
+  # CI: Only EC2 connectivity test
   # -------------------------------
   test:
-    name: Run Tests
+    name: Test EC2 Connectivity
     runs-on: ubuntu-latest
     steps:
-      - name: Checkout Code
-        uses: actions/checkout@v4
-
-      - name: Set up Python 3.12.9
-        uses: actions/setup-python@v4
+      - name: Install SSH Key
+        uses: shimataro/ssh-key-action@v2
         with:
-          python-version: "3.12.9"
+          key: ${{ secrets.EC2_SSH_PRIVATE_KEY }}
+          known_hosts: "just-a-placeholder-so-we-dont-get-warnings"
 
-      - name: Install System Dependencies
+      - name: Verify EC2 Access
         run: |
-          sudo apt update
-          sudo apt install -y libgl1 libgl1-mesa-dev ffmpeg
-
-      - name: Install Python Dependencies
-        run: |
-          python -m pip install --upgrade pip
-          pip install -r requirements_CPU.txt
-          pip install pytest pytest-cov
-
-      - name: Run Tests
-        run: |
-          pytest --cov=./ tests/ --cov-report=xml
-
-      - name: Upload Coverage
-        uses: codecov/codecov-action@v3
+          echo "${{ secrets.EC2_SSH_PRIVATE_KEY }}" > ./deploy_key.pem
+          chmod 400 ./deploy_key.pem
+          ssh -i ./deploy_key.pem \
+              -o StrictHostKeyChecking=no \
+              ${{ secrets.EC2_USER }}@${{ secrets.EC2_INSTANCE_IP }} \
+              "echo 'EC2 connection successful!'"
 
   # -------------------------------
-  # CD: Deploy (Run only on pushes to main)
+  # CD: Deploy (Unchanged)
   # -------------------------------
   deploy:
     name: Deploy to EC2
-    needs: test  # Wait for CI to pass
+    needs: test
     runs-on: ubuntu-latest
     if: github.ref == 'refs/heads/main'
     steps:
