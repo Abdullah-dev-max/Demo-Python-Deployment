@@ -1,30 +1,96 @@
-- name: Deploy via SSH
-  uses: appleboy/ssh-action@v1
-  with:
-    host: ${{ secrets.EC2_INSTANCE_IP }}
-    username: ${{ secrets.EC2_USER }}
-    key: ${{ secrets.EC2_SSH_PRIVATE_KEY }}
-    script: |
-      # Clean up and clone fresh code
-      sudo rm -rf /home/ubuntu/Astra
-      mkdir -p /home/ubuntu/Astra/KYC
-      cd /home/ubuntu/Astra/KYC
-      git clone https://github.com/your-repo/Astra/KYC.git .
+name: CI/CD Pipeline
 
-      # Set up Conda
-      export PATH="$HOME/miniconda/bin:$PATH"
-      eval "$(conda shell.bash hook)"
-      conda init bash
-      source ~/.bashrc
-      conda activate kyc || (conda create -n kyc python=3.12.9 -y && conda activate kyc)
+on:
+  push:
+    branches: [ main ]
+  pull_request:
+    branches: [ main ]
 
-      # Install dependencies
-      if [ ! -f requirements_CPU.txt ]; then
-        echo "Error: requirements_CPU.txt missing!"
-        exit 1
-      fi
-      pip install -r requirements_CPU.txt
+jobs:
+  # -------------------------------
+  # CI: Test & Build (Run on PRs and pushes)
+  # -------------------------------
+  test:
+    name: Run Tests
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout Code
+        uses: actions/checkout@v4
 
-      # Restart Uvicorn
-      pkill -f "uvicorn main:app" || true
-      nohup uvicorn main:app --host 0.0.0.0 --port 8080 > uvicorn.log 2>&1 &
+      - name: Set up Python 3.12.9
+        uses: actions/setup-python@v4
+        with:
+          python-version: "3.12.9"
+
+      - name: Install System Dependencies
+        run: |
+          sudo apt update
+          sudo apt install -y libgl1 libgl1-mesa-dev ffmpeg
+
+      - name: Install Python Dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements_CPU.txt
+          pip install pytest pytest-cov
+
+      - name: Run Tests
+        run: |
+          pytest --cov=./ tests/ --cov-report=xml
+
+      - name: Upload Coverage
+        uses: codecov/codecov-action@v3
+
+  # -------------------------------
+  # CD: Deploy (Run only on pushes to main)
+  # -------------------------------
+  deploy:
+    name: Deploy to EC2
+    needs: test  # Wait for CI to pass
+    runs-on: ubuntu-latest
+    if: github.ref == 'refs/heads/main'
+    steps:
+      - name: Checkout Code
+        uses: actions/checkout@v4
+
+      - name: Install SSH Key
+        uses: shimataro/ssh-key-action@v2
+        with:
+          key: ${{ secrets.EC2_SSH_PRIVATE_KEY }}
+          known_hosts: "just-a-placeholder-so-we-dont-get-warnings"
+
+      - name: Deploy via SSH
+        uses: appleboy/ssh-action@v1
+        with:
+          host: ${{ secrets.EC2_INSTANCE_IP }}
+          username: ${{ secrets.EC2_USER }}
+          key: ${{ secrets.EC2_SSH_PRIVATE_KEY }}
+          script: |
+            # 1. Clean previous deployment
+            sudo rm -rf /home/ubuntu/Astra
+            mkdir -p /home/ubuntu/Astra/KYC
+            cd /home/ubuntu/Astra/KYC
+
+            # 2. Clone fresh code
+            git clone https://github.com/${{ github.repository }}.git .
+
+            # 3. Set up Conda (if not exists)
+            if ! command -v conda &> /dev/null; then
+              wget https://repo.anaconda.com/miniconda/Miniconda3-latest-Linux-x86_64.sh -O miniconda.sh
+              bash miniconda.sh -b -p $HOME/miniconda
+              export PATH="$HOME/miniconda/bin:$PATH"
+            fi
+            eval "$(conda shell.bash hook)"
+            conda init bash
+            source ~/.bashrc
+            conda activate kyc || (conda create -n kyc python=3.12.9 -y && conda activate kyc)
+
+            # 4. Install dependencies
+            pip install -r requirements_CPU.txt
+
+            # 5. Restart FastAPI
+            pkill -f "uvicorn main:app" || true
+            nohup uvicorn main:app --host 0.0.0.0 --port 8080 > uvicorn.log 2>&1 &
+
+            # 6. Verify deployment
+            sleep 5
+            curl -s http://localhost:8080 | grep "Welcome" || echo "Deployment failed!"
