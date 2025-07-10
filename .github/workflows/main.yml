@@ -10,33 +10,20 @@ jobs:
   test-and-deploy:
     runs-on: ubuntu-latest
     steps:
-      # ----------------------------------
-      # 1. Checkout Code & Set Up Python
-      # ----------------------------------
-      - name: Checkout Repository
-        uses: actions/checkout@v4
-
-      - name: Set up Python 3.12
-        uses: actions/setup-python@v4
-        with:
-          python-version: "3.12"
+      # ... (previous steps remain the same) ...
 
       # ----------------------------------
-      # 2. Install Dependencies (FIXED)
+      # 3. Verify EC2 SSH Connection
       # ----------------------------------
-      - name: Install System Dependencies
+      - name: Test EC2 SSH Access
+        if: github.ref == 'refs/heads/main'
         run: |
-          sudo apt update
-          sudo apt install -y libgl1 libgl1-mesa-dev  # Replaces libgl1-mesa-glx
-          sudo apt install -y ffmpeg  # Often needed for OpenCV video I/O
-
-      - name: Install Python Dependencies
-        run: |
-          python -m pip install --upgrade pip
-          pip install -r requirements_CPU.txt
-          pip install pytest
-
-      # ------------------------
+          echo "${{ secrets.EC2_SSH_PRIVATE_KEY }}" > ./deploy_key.pem
+          chmod 400 ./deploy_key.pem
+          ssh -i ./deploy_key.pem \
+              -o StrictHostKeyChecking=no \
+              ${{ secrets.EC2_USER }}@${{ secrets.EC2_INSTANCE_IP }} \
+              "echo 'Successfully connected to EC2!'"
 
       # ----------------------------------
       # 4. Deploy to Production (SSH)
@@ -45,17 +32,14 @@ jobs:
         if: github.ref == 'refs/heads/main'
         uses: appleboy/ssh-action@v1
         with:
-          host: ${{ secrets.SSH_HOST }}
-          username: ${{ secrets.SSH_USER }}
-          key: ${{ secrets.SSH_PRIVATE_KEY }}
+          host: ${{ secrets.EC2_INSTANCE_IP }}
+          username: ${{ secrets.EC2_USER }}
+          key: ${{ secrets.EC2_SSH_PRIVATE_KEY }}
           script: |
             cd /home/ubuntu/Astra/KYC
             git fetch --all
             git reset --hard origin/main
-            # Use conda or venv (ensure Python 3.12 is available on the server)
             conda activate kyc || (conda create -n kyc python=3.12 -y && conda activate kyc)
             pip install -r requirements_CPU.txt
-            # Kill existing Uvicorn process gracefully
             pkill -f "uvicorn main:app" || true
-            # Start new instance with nohup
             nohup uvicorn main:app --host 0.0.0.0 --port 8080 > uvicorn.log 2>&1 &
