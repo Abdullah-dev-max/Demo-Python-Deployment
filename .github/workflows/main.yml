@@ -1,0 +1,59 @@
+name: Deploy to EC2
+
+on:
+  push:
+    branches:
+      - main 
+
+env:
+  DEPLOY_DIR: /home/ubuntu/demo_python_deployment/
+  CONTAINER_NAME: app3
+  APP_PORT: 8080
+  IMAGE_NAME: python_app:latest
+  EC2_HOST: ${{secrets.EC2_INSTANCE_IP}}
+  PEM_KEY: ${{secrets.EC2_SSH_PRIVATE_KEY}}
+  EC2_USER: ubuntu
+  
+jobs:
+  deploy:
+    runs-on: ubuntu-latest 
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4 
+
+      - name: Create target directory on EC2 (if it doesn't exist)
+        uses: appleboy/ssh-action@master
+        with:
+          host: ${{ env.EC2_HOST }}
+          username: ${{ env.EC2_USER }}
+          key: ${{ env.PEM_KEY }}
+          script: |
+            sudo rm -rf ${{env.DEPLOY_DIR}}
+            mkdir -p ${{env.DEPLOY_DIR}}
+
+      - name: Copy Source Code to EC2
+        uses: appleboy/scp-action@master 
+        with:
+          host: ${{ env.EC2_HOST }}
+          username: ${{ env.EC2_USER }}
+          key: ${{ env.PEM_KEY }}
+          source: "./" 
+          target: "${{env.DEPLOY_DIR}}" 
+          
+          
+          
+      - name: Docker Build and Run
+        uses: appleboy/ssh-action@master
+        with:
+          host: ${{ env.EC2_HOST }}
+          username: ${{ env.EC2_USER }}
+          key: ${{ env.PEM_KEY }}
+          script: |
+            cd ${{env.DEPLOY_DIR}}
+            sudo docker build -t ${{env.IMAGE_NAME}} .
+            sudo docker kill ${{env.CONTAINER_NAME}}
+            sudo docker rm ${{env.CONTAINER_NAME}}
+            sudo docker run --name ${{env.CONTAINER_NAME}} -p 8080:8080 -d ${{env.IMAGE_NAME}}
+            sudo docker exec -i ${{env.CONTAINER_NAME}} /bin/bash -c "conda init bash && source /root/.bashrc && conda install python=3.12.11 -y && python -m pip install -r requirements_CPU.txt && uvicorn main:app --host 0.0.0.0 --port 8080 --reload"
+            sudo docker exec ${{env.CONTAINER_NAME}} /bin/bash -c "uvicorn main:app --host 0.0.0.0 --port 8080 --reload"      
